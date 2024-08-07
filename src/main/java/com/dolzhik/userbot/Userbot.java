@@ -83,25 +83,11 @@ public final class Userbot {
 		// Set the log level
 		Log.setLogMessageHandler(1, new Slf4JLogMessageHandler());
 
-		// Create the client factory (You can create more than one client,
-		// BUT only a single instance of ClientFactory is allowed globally!
-		// You must reuse it if you want to create more than one client!)
 		try (SimpleTelegramClientFactory clientFactory = new SimpleTelegramClientFactory()) {
-			// Obtain the API token
-			//
 			var apiToken = new APIToken(botSettings.TDLIB_API_ID, botSettings.TDLIB_API_HASH);
-			//
 
 			// Configure the client
 			TDLibSettings settings = TDLibSettings.create(apiToken);
-
-			// Configure the session directory.
-			// After you authenticate into a session, the authentication will be skipped
-			// from the next restart!
-			// If you want to ensure to match the authentication supplier user/bot with your
-			// session user/bot,
-			// you can name your session directory after your user id, for example:
-			// "tdlib-session-id12345"
 			Path sessionPath = Paths.get(botSettings.SESSION_NAME);
 			settings.setDatabaseDirectoryPath(sessionPath.resolve("data"));
 			settings.setDownloadedFilesDirectoryPath(sessionPath.resolve("downloads"));
@@ -110,14 +96,7 @@ public final class Userbot {
 			SimpleTelegramClientBuilder clientBuilder = clientFactory.builder(settings);
 
 			// Configure the authentication info
-			// Replace with AuthenticationSupplier.consoleLogin(), or .user(xxx), or
-			// .bot(xxx);
-			// SimpleAuthenticationSupplier<?> authenticationData =
-			// AuthenticationSupplier.testUser(7381);
 			SimpleAuthenticationSupplier<?> authenticationData = AuthenticationSupplier.qrCode();
-
-			// This is an example, remove this line to use the real telegram datacenters!
-			// settings.setUseTestDatacenter(true);
 
 			// Create and start the client
 			try (var app = new App(clientBuilder, authenticationData, adminId, new GptModel(botSettings.OPENAI_TOKEN),
@@ -139,65 +118,6 @@ public final class Userbot {
 								executors.put(action.getChatId(), executor);
 								forkJoinPool.execute(executor);
 							}
-							// For the selected group chat, skip action if it was sent more than 2 minutes
-							// ago
-							// if ( action.getChatId() == botSettings.CURRENT_CHAT &&
-							// action.getDate().isBefore(Instant.now().minus(2, ChronoUnit.MINUTES))) {
-							// System.out.println("Action is older than 2 minutes. Skipping: " + action);
-							// break;
-							// }
-
-							// if ("reply".equals(action.getType())) {
-							// if (!action.getDate().isBefore(Instant.now().minusSeconds(30))) { // if
-							// message was sent
-							// // less than 30
-							// // seconds ago wait
-							// // for 10-60 seconds
-							// var wait = Utills.getRandomFromRange(10, 60);
-							// System.out.println("Waiting " + wait + " seconds");
-							// Thread.sleep(Duration.ofSeconds(wait));
-							// }
-							// app.replyToMessage(action.getChatId(), action.getMessageId());
-							// }
-
-							// if ("new".equals(action.getType())) {
-							// var wait = Utills.getRandomFromRange(10, 60);
-							// System.out.println("Waiting " + wait + " seconds");
-							// Thread.sleep(Duration.ofSeconds(wait));
-							// app.newMessage(action.getChatId());
-							// }
-
-							// if ("reaction".equals(action.getType())) {
-							// var wait = Utills.getRandomFromRange(1, 5);
-							// System.out.println("Waiting " + wait + " seconds");
-							// Thread.sleep(Duration.ofSeconds(wait));
-							// app.reactToMessage(action.getChatId(), action.getMessageId());
-							// }
-
-							// if ("sticker".equals(action.getType())) {
-							// var wait = Utills.getRandomFromRange(5, 10);
-							// System.out.println("Waiting " + wait + " seconds");
-							// Thread.sleep(Duration.ofSeconds(wait));
-							// app.replyWithSticker(action.getChatId(), action.getMessageId());
-							// }
-
-							// if ("reply_no_mention".equals(action.getType())) {
-							// var wait = Utills.getRandomFromRange(5, 10);
-							// System.out.println("Waiting " + wait + " seconds");
-							// Thread.sleep(Duration.ofSeconds(wait));
-							// app.replyToMessage(action.getChatId(), action.getMessageId());
-							// }
-
-							// if ("chats".equals(action.getType())) {
-							// app.test();
-							// }
-
-							// if ("test_read".equals(action.getType())) {
-							// var messages = app.readChatHistory(30, action.getChatId(),
-							// action.getMessageId());
-							// var history = app.buildHistoryContext(messages);
-							// System.out.println(history);
-							// }
 
 						} catch (InterruptedException e) {
 							System.out.println("Can't take action from the queue");
@@ -205,27 +125,6 @@ public final class Userbot {
 						}
 					}
 
-					// Chat specific action for Kurilka
-					// Check if the last message was sent less than 60 minutes ago and in working
-					// hours
-					// if (Instant.ofEpochMilli(app.getLastMessageTimeStamp())
-					// .isBefore(Instant.now().minus(60, ChronoUnit.MINUTES))
-					// && Utills.isInWorkingHours(Instant.now())) {
-					// try {
-					// System.out.println(
-					// "Chat is not active for at least 60 minutes. And it is working hours. Pausing
-					// main thread for 60 seconds");
-					// Thread.sleep(Duration.ofSeconds(60));
-					// if (Utills.chance(0.01)) { // 1% chance to send new message
-					// System.out.println("Sending new message due to inactivity");
-					// app.updateLastMessageTimeStamp(Instant.now().toEpochMilli());
-					// app.newMessage(botSettings.CURRENT_CHAT);
-					// }
-					// } catch (Exception e) {
-					// e.printStackTrace();
-					// }
-
-					// }
 					// Check for new tasks every 1 second
 					Thread.sleep(1000);
 				}
@@ -248,13 +147,6 @@ public final class Userbot {
 		private final List<UpdateProcessor> updateProcessors = Arrays.asList(new PrivateChatUpdateProcessor(),
 				new GroupChatUpdateProcessor());
 
-		// private HashMap<Long, User> userCache = new HashMap<>();
-		// private HashMap<Long, String> voiceToTextCache = new HashMap<>();
-		// private HashMap<Long, String> imageCaptionCache = new HashMap<>();
-
-		/**
-		 * Admin user id, used by the stop command example
-		 */
 		private final long adminId;
 
 		public App(SimpleTelegramClientBuilder clientBuilder,
@@ -373,82 +265,6 @@ public final class Userbot {
 							scheduleAction(action.get());
 						});
 
-				// if (update.message.chatId == botSettings.CURRENT_CHAT) {
-				// // SELECTED GROUP CHAT FLOW
-				// boolean repliedToMetion = false;
-				// if (update.message.containsUnreadMention &&
-				// Utills.chance(botSettings.DIRECT_REPLY_CHANCE)) {
-				// System.out.println("Chat " + chatId + " contains unread mention");
-				// scheduleAction(update, "reply");
-				// repliedToMetion = true;
-				// }
-
-				// boolean addedReaction = false;
-				// if (Utills.chance(botSettings.REACTION_CHANCE) && !repliedToMetion) {
-				// System.out.println("Decided to add a reaction to the message: " + text);
-				// scheduleAction(update, "reaction");
-				// addedReaction = true;
-				// }
-
-				// boolean repliedWithSticker = false;
-				// if (Utills.chance(botSettings.STICKER_CHANCE) && !repliedToMetion &&
-				// !addedReaction) {
-				// System.out.println("Decided to reply with a sticker to the message: " +
-				// text);
-				// scheduleAction(update, "sticker");
-				// repliedWithSticker = true;
-				// }
-
-				// boolean newMessageSent = false;
-				// if (Utills.chance(botSettings.NEW_MESSAGE_CHANCE) && !repliedToMetion &&
-				// !repliedWithSticker) {
-				// System.out.println("Decided to write a new message to chat: " + chatId);
-				// scheduleAction(update, "new");
-				// newMessageSent = true;
-				// }
-
-				// boolean repliedNoMention = false;
-				// if (Utills.chance(botSettings.REPLY_NO_MENTION_CHANCE) && !repliedToMetion &&
-				// !newMessageSent) {
-				// System.out.println("Decided to reply to the message: " + text);
-				// scheduleAction(update, "reply_no_mention");
-				// repliedNoMention = true;
-				// }
-
-				// if (Utills.chance(botSettings.REPLY_TO_NAME_CHANCE) && !repliedToMetion &&
-				// !newMessageSent
-				// && !repliedNoMention
-				// &&
-				// text.toLowerCase().contains(botSettings.CHARACTER_NAME.toLowerCase().substring(0,
-				// botSettings.CHARACTER_NAME.length() - 1))) {
-				// System.out.println("Decided to reply to the message: " + text);
-				// scheduleAction(update, "reply_no_mention");
-				// }
-				// } else if (update.message.chatId != -1002097327825L) {
-				// // REGULAR CHATS FLOW INCLUDING PRIVATE
-
-				// if (Utills.chance(botSettings.DIRECT_REPLY_CHANCE)) {
-				// System.out.println("Decided to reply to the message: " + text);
-				// if (Utills.chance(0.5)) {
-				// scheduleAction(update, "reply");
-				// } else {
-				// scheduleAction(update, "new");
-				// }
-				// return;
-				// }
-
-				// if (Utills.chance(botSettings.REACTION_CHANCE)) {
-				// System.out.println("Decided to add a reaction to the message: " + text);
-				// scheduleAction(update, "reaction");
-				// }
-
-				// if (Utills.chance(botSettings.STICKER_CHANCE)) {
-				// System.out.println("Decided to reply with a sticker to the message: " +
-				// text);
-				// scheduleAction(update, "sticker");
-				// }
-				// }
-
 			}
 
 		}
@@ -519,24 +335,9 @@ public final class Userbot {
 				}
 			}
 			System.out.println("Got total " + messageList.size() + " messages");
-			// messageList.forEach(m -> System.out.println("Message: " + m.id));
 
-			// if (messageList.size() >= 4) {
-			// var subList = messageList.subList(0, 4);
-			// var toRemove = subList.stream().filter(a -> subList.stream().filter(b -> a.id
-			// == b.id).count() > 1).map(m -> m.id).toList();
-			// System.out.println("Removing duplicates: " + toRemove.size());
-			// toRemove.forEach(m -> System.out.println("Removing: " + m));
-			// messageList.removeIf(m -> toRemove.contains(m.id));
-			// }
-			// if (messageList.size() >= 2) {
-			// if (messageList.get(0).id == messageList.get(1).id) {
-			// System.out.println("Removing duplicate message " + messageList.get(0).id);
-			// messageList.removeFirst();
-			// }
-			// }
-			messageList.removeIf(a -> messageList.stream().filter(b -> a.id == b.id).count() > 1);
-			return messageList; // To remove duplicates
+			messageList.removeIf(a -> messageList.stream().filter(b -> a.id == b.id).count() > 1);// To remove duplicates
+			return messageList; 
 		}
 
 		private void simulateStatusFor(long seconds, long chatId, ChatAction action) {
@@ -698,31 +499,7 @@ public final class Userbot {
 										botSettings.compileChatEntry(name, message,
 												getNameMessageUserOfMessageReplyTo(message)));
 
-							}
-							;
-
-							// if (message.content instanceof TdApi.MessageVoiceNote voice) {
-							// getVoice(voice).flatMap(file -> voiceToText(file, message.id)).ifPresent(text
-							// -> {
-							// stringBuilder.append(
-							// Utills.compileChatEntryVoice(name,
-							// text, message.date));
-							// });
-							// } else if (message.content instanceof TdApi.MessageVideoNote videoNote) {
-							// // videoNote.videoNote.speechRecognitionResult
-							// } else if (message.content instanceof TdApi.MessagePhoto photo) {
-							// getPhoto(photo).flatMap(bytes -> captionPhoto(bytes,
-							// message.id)).ifPresent(caption -> {
-							// System.out.println("Caption: " + caption);
-							// stringBuilder.append(
-							// Utills.compileChatEntryPhoto(name, photo.caption.text, caption,
-							// message.date));
-							// });
-							// } else {
-							// stringBuilder.append(
-							// Utills.compileChatEntry(name, message,
-							// getNameMessageUserOfMessageReplyTo(message)));
-							// }
+							};
 						});
 					});
 			System.out.println("History context: " + stringBuilder.toString());
