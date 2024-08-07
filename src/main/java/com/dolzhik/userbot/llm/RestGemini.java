@@ -15,14 +15,15 @@ import com.google.gson.Gson;
 public class RestGemini implements LanguageModel {
 
     private final HttpClient httpClient;
-    private final String key = "AIzaSyAy96jzeC7oJ07m1l8POy1RzIDQh1oUQeg";
+    private final String token;
     private final String flash = "gemini-1.5-flash-latest";
     private final String pro = "gemini-1.5-pro-latest";
     private final Gson gson;
 
-    public RestGemini() {
+    public RestGemini(String token) {
         this.httpClient = HttpClient.newHttpClient();
         this.gson = new Gson();
+        this.token = token;
     }
 
     @Override
@@ -30,7 +31,7 @@ public class RestGemini implements LanguageModel {
 
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create("https://generativelanguage.googleapis.com/v1beta/models/" + flash
-                        + ":generateContent?key=" + key))
+                        + ":generateContent?key=" + token))
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(buildBody(systemPromt, promt, "1.0")))
                 .build();
@@ -49,7 +50,7 @@ public class RestGemini implements LanguageModel {
     public Optional<String> llmReplyToMessage(String systemPromt, String promt) {
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create("https://generativelanguage.googleapis.com/v1beta/models/" + flash
-                        + ":generateContent?key=" + key))
+                        + ":generateContent?key=" + token))
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(buildBody(systemPromt, promt, "1.0")))
                 .build();
@@ -68,7 +69,7 @@ public class RestGemini implements LanguageModel {
     public Optional<String> llmChooseEmoji(String promt) {
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create("https://generativelanguage.googleapis.com/v1beta/models/" + flash
-                        + ":generateContent?key=" + key))
+                        + ":generateContent?key=" + token))
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(buildBody("You ara an expert of emoji captioning", promt, "1.0")))
                 .build();

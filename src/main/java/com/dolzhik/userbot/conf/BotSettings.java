@@ -53,7 +53,6 @@ public class BotSettings {
                         Properties properties = new Properties();
                         properties.load(new BufferedReader(
                                         new InputStreamReader(new FileInputStream("bot.properties"), "utf-8")));
-                        // properties.load(new FileInputStream("bot.properties"));
 
                         USER_BOT_ID = Optional.ofNullable(properties.getProperty("user_bot_id"))
                                         .map(value -> Long.parseLong(value))
