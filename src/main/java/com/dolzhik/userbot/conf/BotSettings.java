@@ -165,7 +165,7 @@ public class BotSettings {
 
         public String compileChatEntryPhoto(String name, String description, String caption, int timestamp,
                         Optional<String> inResponseTo) {
-                return String.format("%s %s (Message with picture): %s [Picture caption: %s]",
+                return String.format("%s %s (Message with picture): %s [Picture caption: %s]\n",
                                 DATE_FORMAT.format(Utills.timestampToDate(timestamp)),
                                 (name + " " + inResponseTo.map(n -> "in response to " + n).orElse("")).trim(),
                                 description, caption);
