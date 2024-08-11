@@ -47,6 +47,7 @@ public class BotSettings {
         public final String OPENAI_TOKEN;
         public final String GROQ_TOKEN;
         public final String GEMINI_TOKEN;
+        public final long CACHE_CLEANING_INTERVAL;
 
         public BotSettings() throws IllegalStateException {
                 try {
@@ -135,6 +136,10 @@ public class BotSettings {
                         GEMINI_TOKEN = Optional.ofNullable(properties.getProperty("gemini_token"))
                                         .orElseThrow(() -> new IllegalStateException(
                                                         "gemini_token property not found"));
+                        CACHE_CLEANING_INTERVAL = Optional.ofNullable(properties.getProperty("cache_cleaning_interval"))
+                                        .map(value -> Long.parseLong(value))
+                                        .orElseThrow(() -> new IllegalStateException(
+                                                        "cache_cleaning_interval property not found"));
 
                 } catch (IOException e) {
                         e.printStackTrace();

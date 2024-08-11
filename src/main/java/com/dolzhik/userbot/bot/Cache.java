@@ -24,5 +24,11 @@ public class Cache {
 
     public void putMediaCaption(long messageId, String caption) {
         mediaCaptions.put(messageId, caption);
+
+    }
+
+    public void clear() {
+        users.clear();
+        mediaCaptions.clear();
     }
 }

@@ -14,17 +14,19 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Random;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ForkJoinPool;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import com.dolzhik.userbot.bot.ActionQueueMap;
 import com.dolzhik.userbot.bot.Cache;
-import com.dolzhik.userbot.bot.ChatExecutor;
+import com.dolzhik.userbot.bot.CacheCleaner;
+import com.dolzhik.userbot.bot.ChatActionExecutor;
 import com.dolzhik.userbot.bot.updateProcessor.GroupChatUpdateProcessor;
 import com.dolzhik.userbot.bot.updateProcessor.PrivateChatUpdateProcessor;
 import com.dolzhik.userbot.bot.updateProcessor.UpdateProcessor;
@@ -65,8 +67,10 @@ public final class Userbot {
 
 	private static BotSettings botSettings;
 	private static final ActionQueueMap actionQueueMap = new ActionQueueMap();
-	private static final ForkJoinPool forkJoinPool = ForkJoinPool.commonPool();
-	private static final Map<Long, ChatExecutor> executors = new HashMap<>();
+	private static final ExecutorService executorService = Executors.newCachedThreadPool();
+	private static final ScheduledExecutorService scheduledExecutorService = Executors
+			.newSingleThreadScheduledExecutor();
+	private static final Map<Long, ChatActionExecutor> executors = new HashMap<>();
 
 	public static void main(String[] args) throws Exception {
 		long adminId = Integer.getInteger("it.tdlight.example.adminid", 894954498);
@@ -102,21 +106,24 @@ public final class Userbot {
 			try (var app = new App(clientBuilder, authenticationData, adminId, new GptModel(botSettings.OPENAI_TOKEN),
 					new GroqWhisper(botSettings.GROQ_TOKEN), new RestGeminiCaptioner(botSettings.GEMINI_TOKEN))) {
 
+				// Start the cache cleaner task, which will clean the cache every 24 hours
+				scheduledExecutorService.scheduleAtFixedRate(new CacheCleaner(app.getCache()), botSettings.CACHE_CLEANING_INTERVAL, botSettings.CACHE_CLEANING_INTERVAL, TimeUnit.HOURS);
+
 				while (true) {
 					while (app.getActionQueue().peek() != null) {
 						try {
 							Action action = app.getActionQueue().take();
-							System.out.println("Received action: " + action);
+							System.out.println("Received action in main thread: " + action);
 
 							actionQueueMap.getQueue(action.getChatId()).put(action);
 
 							if ((executors.containsKey(action.getChatId())
 									&& executors.get(action.getChatId()).isStopped())
 									|| !executors.containsKey(action.getChatId())) {
-								ChatExecutor executor = new ChatExecutor(actionQueueMap.getQueue(action.getChatId()),
+								ChatActionExecutor executor = new ChatActionExecutor(actionQueueMap.getQueue(action.getChatId()),
 										app);
 								executors.put(action.getChatId(), executor);
-								forkJoinPool.execute(executor);
+								executorService.execute(executor);
 							}
 
 						} catch (InterruptedException e) {
@@ -137,7 +144,6 @@ public final class Userbot {
 		private final SimpleTelegramClient client;
 
 		private final LinkedBlockingQueue<Action> actions = new LinkedBlockingQueue<>();
-		private final AtomicLong lastMessageTimeStamp = new AtomicLong(Instant.now().toEpochMilli());
 
 		private final LanguageModel llm;
 		private final VoiceToText voiceToText;
@@ -239,9 +245,6 @@ public final class Userbot {
 							|| update.message.content instanceof TdApi.MessagePhoto
 							|| update.message.content instanceof TdApi.MessageVideoNote)) {
 
-				// Update last message timestamp
-				lastMessageTimeStamp.set(Utills.timestampToDate(update.message.date).toInstant().toEpochMilli());
-
 				// Get the message text
 				String text;
 				if (messageContent instanceof TdApi.MessageText messageText) {
@@ -336,8 +339,9 @@ public final class Userbot {
 			}
 			System.out.println("Got total " + messageList.size() + " messages");
 
-			messageList.removeIf(a -> messageList.stream().filter(b -> a.id == b.id).count() > 1);// To remove duplicates
-			return messageList; 
+			// Remove duplicates
+			messageList.removeIf(a -> messageList.stream().filter(b -> a.id == b.id).count() > 1);
+			return messageList;
 		}
 
 		private void simulateStatusFor(long seconds, long chatId, ChatAction action) {
@@ -405,7 +409,7 @@ public final class Userbot {
 				});
 			});
 
-			//closeChat(chatId);
+			// closeChat(chatId);
 		}
 
 		public void newMessage(long chatId) {
@@ -431,7 +435,7 @@ public final class Userbot {
 						client.sendMessage(request, true);
 					});
 
-			//closeChat(chatId);
+			// closeChat(chatId);
 		}
 
 		private String chooseEmoji(String context, String message) {
@@ -499,7 +503,8 @@ public final class Userbot {
 										botSettings.compileChatEntry(name, message,
 												getNameMessageUserOfMessageReplyTo(message)));
 
-							};
+							}
+							;
 						});
 					});
 			System.out.println("History context: " + stringBuilder.toString());
@@ -543,9 +548,9 @@ public final class Userbot {
 
 			} catch (InterruptedException | ExecutionException e) {
 				e.printStackTrace();
-				//closeChat(chatId);
+				// closeChat(chatId);
 			}
-			//closeChat(chatId);
+			// closeChat(chatId);
 		}
 
 		public void reactToMessage(long chatId, long messageId) {
@@ -582,9 +587,9 @@ public final class Userbot {
 				client.send(request).get();
 			} catch (InterruptedException | ExecutionException e) {
 				e.printStackTrace();
-				//closeChat(chatId);
+				// closeChat(chatId);
 			}
-			//closeChat(chatId);
+			// closeChat(chatId);
 		}
 
 		private Optional<Message> getMessage(long chatId, long messageId) {
@@ -641,13 +646,6 @@ public final class Userbot {
 			}
 		}
 
-		public long getLastMessageTimeStamp() {
-			return lastMessageTimeStamp.get();
-		}
-
-		public void updateLastMessageTimeStamp(long timestamp) {
-			lastMessageTimeStamp.set(timestamp);
-		}
 
 		// Download voice note from remote and use ffmpeg to convert voice note to mp3
 		private Optional<byte[]> getVoice(TdApi.MessageVoiceNote message) {
@@ -804,6 +802,10 @@ public final class Userbot {
 				System.out.println("Can't close chat: " + chatId);
 				e.printStackTrace();
 			}
+		}
+
+		public Cache getCache() {
+			return cache;
 		}
 
 		public void test() {

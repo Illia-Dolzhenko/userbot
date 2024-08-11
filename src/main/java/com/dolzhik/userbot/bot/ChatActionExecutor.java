@@ -10,13 +10,13 @@ import com.dolzhik.userbot.Action;
 import com.dolzhik.userbot.Userbot.App;
 import com.dolzhik.userbot.Utills;
 
-public class ChatExecutor implements Runnable {
+public class ChatActionExecutor implements Runnable {
 
     protected final LinkedBlockingQueue<Action> actionQueue;
     protected final App app;
     protected AtomicBoolean stopped;
 
-    public ChatExecutor(LinkedBlockingQueue<Action> actionQueue, App app) {
+    public ChatActionExecutor(LinkedBlockingQueue<Action> actionQueue, App app) {
         this.actionQueue = actionQueue;
         this.app = app;
         this.stopped = new AtomicBoolean(false);
@@ -29,7 +29,7 @@ public class ChatExecutor implements Runnable {
             while (actionQueue.peek() != null) {
                 try {
                     Action action = actionQueue.take();
-                    System.out.println("Received action: " + action);
+                    System.out.println("[ChatExecutor] Received action: " + action + " in thread: " + Thread.currentThread().getName());
 
                     if (action.getDate().isBefore(Instant.now().minus(2, ChronoUnit.MINUTES))) {
                         System.out.println("Action is older than 3 minutes. Skipping: " + action);
