@@ -9,6 +9,7 @@ import java.util.Random;
 import io.github.stefanbratanov.jvm.openai.ChatCompletion;
 import io.github.stefanbratanov.jvm.openai.ChatCompletion.Choice;
 import it.tdlight.jni.TdApi;
+import it.tdlight.jni.TdApi.Chat;
 import it.tdlight.jni.TdApi.Message;
 
 public class Utills {
@@ -87,6 +88,10 @@ public class Utills {
             return Optional.of(chat.chatId);
         }
         return Optional.empty();
+    }
+
+    public static boolean isPrivateChat(Chat chat) {
+        return chat.type instanceof TdApi.ChatTypePrivate;
     }
 
 }

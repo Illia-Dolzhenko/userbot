@@ -13,6 +13,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Random;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -22,6 +23,9 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import com.dolzhik.userbot.bot.ActionQueueMap;
 import com.dolzhik.userbot.bot.Cache;
@@ -67,17 +71,19 @@ public final class Userbot {
 
 	private static BotSettings botSettings;
 	private static final ActionQueueMap actionQueueMap = new ActionQueueMap();
+	private static final Map<Long, Instant> lastIsTypingActionMap = new ConcurrentHashMap<>();
 	private static final ExecutorService executorService = Executors.newCachedThreadPool();
 	private static final ScheduledExecutorService scheduledExecutorService = Executors
 			.newSingleThreadScheduledExecutor();
 	private static final Map<Long, ChatActionExecutor> executors = new HashMap<>();
+	private static Logger logger = LoggerFactory.getLogger(Userbot.class);
 
 	public static void main(String[] args) throws Exception {
 		long adminId = Integer.getInteger("it.tdlight.example.adminid", 894954498);
 		try {
 			botSettings = new BotSettings();
 		} catch (IllegalStateException e) {
-			e.printStackTrace();
+			logger.error("Failed to load bot settings", e);
 			return;
 		}
 
@@ -85,7 +91,8 @@ public final class Userbot {
 		Init.init();
 
 		// Set the log level
-		Log.setLogMessageHandler(1, new Slf4JLogMessageHandler());
+		Log.setLogMessageHandler(-1, new Slf4JLogMessageHandler());
+		Log.disable(); 
 
 		try (SimpleTelegramClientFactory clientFactory = new SimpleTelegramClientFactory()) {
 			var apiToken = new APIToken(botSettings.TDLIB_API_ID, botSettings.TDLIB_API_HASH);
@@ -103,37 +110,40 @@ public final class Userbot {
 			SimpleAuthenticationSupplier<?> authenticationData = AuthenticationSupplier.qrCode();
 
 			// Create and start the client
-			try (var app = new App(clientBuilder, authenticationData, adminId, new GptModel(botSettings.OPENAI_TOKEN),
+			try (var app = new App(clientBuilder, authenticationData, adminId, lastIsTypingActionMap,
+					new GptModel(botSettings.OPENAI_TOKEN),
 					new GroqWhisper(botSettings.GROQ_TOKEN), new RestGeminiCaptioner(botSettings.GEMINI_TOKEN))) {
 
 				// Start the cache cleaner task, which will clean the cache every 24 hours
-				scheduledExecutorService.scheduleAtFixedRate(new CacheCleaner(app.getCache()), botSettings.CACHE_CLEANING_INTERVAL, botSettings.CACHE_CLEANING_INTERVAL, TimeUnit.HOURS);
+				scheduledExecutorService.scheduleAtFixedRate(new CacheCleaner(app.getCache()),
+						botSettings.CACHE_CLEANING_INTERVAL, botSettings.CACHE_CLEANING_INTERVAL, TimeUnit.HOURS);
 
 				while (true) {
 					while (app.getActionQueue().peek() != null) {
 						try {
 							Action action = app.getActionQueue().take();
-							System.out.println("Received action in main thread: " + action);
+							logger.debug("Received action from the main queue: " + action);
 
 							actionQueueMap.getQueue(action.getChatId()).put(action);
 
 							if ((executors.containsKey(action.getChatId())
 									&& executors.get(action.getChatId()).isStopped())
 									|| !executors.containsKey(action.getChatId())) {
-								ChatActionExecutor executor = new ChatActionExecutor(actionQueueMap.getQueue(action.getChatId()),
+								ChatActionExecutor executor = new ChatActionExecutor(
+										actionQueueMap.getQueue(action.getChatId()),
+										lastIsTypingActionMap,
 										app);
 								executors.put(action.getChatId(), executor);
 								executorService.execute(executor);
 							}
 
 						} catch (InterruptedException e) {
-							System.out.println("Can't take action from the queue");
-							e.printStackTrace();
+							logger.error("Can't take action from the main queue", e);
 						}
 					}
 
-					// Check for new tasks every 1 second
-					Thread.sleep(1000);
+					// Check for new tasks every 0.1 second
+					Thread.sleep(100);
 				}
 			}
 		}
@@ -142,8 +152,10 @@ public final class Userbot {
 	public static class App implements AutoCloseable {
 
 		private final SimpleTelegramClient client;
+		private final Logger logger = LoggerFactory.getLogger(App.class);
 
 		private final LinkedBlockingQueue<Action> actions = new LinkedBlockingQueue<>();
+		private final Map<Long,Instant> lastIsTypingActionMap;
 
 		private final LanguageModel llm;
 		private final VoiceToText voiceToText;
@@ -158,6 +170,7 @@ public final class Userbot {
 		public App(SimpleTelegramClientBuilder clientBuilder,
 				SimpleAuthenticationSupplier<?> authenticationData,
 				long adminId,
+				Map<Long, Instant> lastIsTypingActionMap,
 				LanguageModel model,
 				VoiceToText voiceToText,
 				ImageCaptioner imageCaptioner) {
@@ -165,6 +178,7 @@ public final class Userbot {
 			this.llm = model;
 			this.voiceToText = voiceToText;
 			this.imageCaptioner = imageCaptioner;
+			this.lastIsTypingActionMap = lastIsTypingActionMap;
 
 			// Add an example update handler that prints when the bot is started
 			clientBuilder.addUpdateHandler(TdApi.UpdateAuthorizationState.class, this::onUpdateAuthorizationState);
@@ -174,6 +188,8 @@ public final class Userbot {
 
 			// Add an example update handler that prints every received message
 			clientBuilder.addUpdateHandler(TdApi.UpdateNewMessage.class, this::onUpdateNewMessage);
+
+			clientBuilder.addUpdateHandler(TdApi.UpdateChatAction.class, this::onUpdateChatAction);
 
 			// Build the client
 			this.client = clientBuilder.build(authenticationData);
@@ -194,13 +210,13 @@ public final class Userbot {
 		private void onUpdateAuthorizationState(TdApi.UpdateAuthorizationState update) {
 			AuthorizationState authorizationState = update.authorizationState;
 			if (authorizationState instanceof TdApi.AuthorizationStateReady) {
-				System.out.println("Logged in");
+				logger.info( "Logged in");
 			} else if (authorizationState instanceof TdApi.AuthorizationStateClosing) {
-				System.out.println("Closing...");
+				logger.info( "Closing...");
 			} else if (authorizationState instanceof TdApi.AuthorizationStateClosed) {
-				System.out.println("Closed");
+				logger.info( "Closed");
 			} else if (authorizationState instanceof TdApi.AuthorizationStateLoggingOut) {
-				System.out.println("Logging out...");
+				logger.info( "Logging out...");
 			}
 		}
 
@@ -213,14 +229,14 @@ public final class Userbot {
 			long chatId = update.message.chatId;
 
 			if (botSettings.isInIgnoreList(chatId)) {
-				System.out.println("Chat " + chatId + " is in ignore list. Ignoring message from this chat");
+				logger.info("Chat " + chatId + " is in ignore list. Ignoring message from this chat");
 				return;
 			}
 
 			if (chatId == adminId) {
 				// Received message from admin
 				if (messageContent instanceof TdApi.MessageText messageText) {
-					System.out.println("Received new message from admin: " + messageText.text.text);
+					logger.info("Received new message from admin: " + messageText.text.text);
 					if ("new".equals(messageText.text.text)) {
 						scheduleAction("new", botSettings.CURRENT_CHAT, 0, Instant.now());
 						return;
@@ -256,10 +272,10 @@ public final class Userbot {
 					text = String.format("(%s)", messageContent.getClass().getSimpleName());
 				}
 
-				System.out.printf("Received new message in chat (%s) from user (%s): %s%n", chatId, user.userId, text);
+				logger.info("Received new message in chat {} from user {}: {}", chatId, user.userId, text);
 
 				if (Utills.timestampToDate(update.message.date).before(Date.from(Instant.now().minusSeconds(60)))) {
-					System.out.println("Message is too old, Skipping");
+					logger.info("Message is too old, Skipping");
 					return;
 				}
 
@@ -272,6 +288,12 @@ public final class Userbot {
 
 		}
 
+		private void onUpdateChatAction(TdApi.UpdateChatAction update) {
+			if (update.action instanceof TdApi.ChatActionTyping) {
+				lastIsTypingActionMap.put(update.chatId, Instant.now());
+			}
+		}
+
 		/**
 		 * Close the bot if the /stop command is sent by the administrator
 		 */
@@ -279,7 +301,7 @@ public final class Userbot {
 			// Check if the sender is the admin
 			if (isAdmin(commandSender)) {
 				// Stop the client
-				System.out.println("Received stop command. closing...");
+				logger.info("Received stop command. closing...");
 				client.sendClose();
 			}
 		}
@@ -300,7 +322,7 @@ public final class Userbot {
 		}
 
 		public List<Message> readChatHistory(int size, long chatId, long messageId) {
-			System.out.println("Reading chat history from " + chatId);
+			logger.debug("Reading chat history from " + chatId);
 			var offset = -5; // get 5 newer messages
 			var numberOfMessages = size;
 			var fromId = messageId;
@@ -308,13 +330,12 @@ public final class Userbot {
 
 			while (numberOfMessages > 0) {
 				try {
-					System.out.println("Reading chat history from: " + fromId + " offset: " + offset
-							+ " numberOfMessages: " + numberOfMessages);
+					logger.debug("Reading chat history from: {}, offset: {}, numberOfMessages: {}", fromId, offset, numberOfMessages);
 					var messages = client
 							.send(new TdApi.GetChatHistory(chatId, fromId, offset, numberOfMessages, false))
 							.get(1, TimeUnit.MINUTES);
 
-					System.out.println("Got chunk of " + messages.totalCount + " messages");
+					logger.debug("Got chunk of {} messages", messages.totalCount);
 
 					if (messages.totalCount == 0) {
 						break;
@@ -337,7 +358,7 @@ public final class Userbot {
 					break;
 				}
 			}
-			System.out.println("Got total " + messageList.size() + " messages");
+			logger.debug("Got total {} messages", messageList.size());
 
 			// Remove duplicates
 			messageList.removeIf(a -> messageList.stream().filter(b -> a.id == b.id).count() > 1);
@@ -345,7 +366,8 @@ public final class Userbot {
 		}
 
 		private void simulateStatusFor(long seconds, long chatId, ChatAction action) {
-			System.out.println("Simulating action for " + seconds + " seconds");
+			logger.info("Simulating action ({}) for {} seconds", action.getClass().getSimpleName(), seconds);
+			
 			for (int i = 0; i < seconds; i += 2) {
 				try {
 					client.send(new TdApi.SendChatAction(chatId, 0, action));
@@ -357,7 +379,7 @@ public final class Userbot {
 		}
 
 		public void replyToMessage(long chatId, long messageId) {
-			System.out.println("Replying to a message " + messageId + " in chat " + chatId);
+			logger.info("Replying to a message {} in chat {}", messageId, chatId);
 
 			var messages = readChatHistory(30, chatId, messageId);
 			openChat(chatId, messages.stream().map(m -> m.id).toList());
@@ -390,7 +412,7 @@ public final class Userbot {
 						llm.llmReplyToMessage(systemPromt,
 								botSettings.buildPromtForReply(messageInfo))
 								.ifPresent(llmResponse -> {
-									System.out.println("Generated reply: " + llmResponse);
+									logger.info("LLM generated reply: {}", llmResponse);
 									simulateStatusFor(Utills.timeToType(llmResponse), chatId,
 											new TdApi.ChatActionTyping());
 
@@ -413,7 +435,7 @@ public final class Userbot {
 		}
 
 		public void newMessage(long chatId) {
-			System.out.println("Sending new message to chat " + chatId);
+			logger.info("Sending new message to chat {}", chatId);
 
 			var messages = readChatHistory(20, chatId, 0L);
 			openChat(chatId, messages.stream().map(m -> m.id).toList());
@@ -423,7 +445,7 @@ public final class Userbot {
 
 			llm.llmWriteNewMessage(systemPromt, botSettings.buildPromtForNewMessage())
 					.ifPresent(message -> {
-						System.out.println("Generated message: " + message);
+						logger.info("LLM generated new message: {}", message);
 						simulateStatusFor(Utills.timeToType(message), chatId, new TdApi.ChatActionTyping());
 
 						var request = new SendMessage();
@@ -486,7 +508,6 @@ public final class Userbot {
 										});
 								case TdApi.MessagePhoto photo -> getPhoto(photo)
 										.flatMap(bytes -> captionPhoto(bytes, message.id)).ifPresent(caption -> {
-											System.out.println("Caption: " + caption);
 											stringBuilder
 													.append(botSettings.compileChatEntryPhoto(name, photo.caption.text,
 															caption, message.date,
@@ -507,13 +528,13 @@ public final class Userbot {
 							;
 						});
 					});
-			System.out.println("History context: " + stringBuilder.toString());
+			logger.debug("History context: " + stringBuilder.toString());
 			return stringBuilder.toString();
 		}
 
 		public void replyWithSticker(long chatId, long messageId) {
 			try {
-				System.out.println("Replying to a message " + messageId + " in chat " + chatId + " with sticker");
+				logger.info("Replying to a message {} in chat {} with a sticker", messageId, chatId);
 
 				var message = client.send(new TdApi.GetMessage(chatId, messageId)).get();
 				openChat(chatId, Arrays.asList(message.id));
@@ -521,11 +542,11 @@ public final class Userbot {
 				String selectedEmoji = Utills.getTextFromMessage(message).map(text -> chooseEmoji("", text))
 						.orElseGet(() -> chooseRandomEmoji());
 
-				System.out.println("Selected emoji: " + selectedEmoji);
+				logger.info("Selected emoji: {}", selectedEmoji);
 
 				var stickers = client
 						.send(new TdApi.GetStickers(new TdApi.StickerTypeRegular(), selectedEmoji, 100, chatId)).get();
-				System.out.println("Got " + stickers.stickers.length + " stickers");
+				logger.debug("Got {} stickers corresponding to {}", stickers.stickers.length, selectedEmoji);
 
 				if (stickers.stickers.length > 0) {
 					var sticker = stickers.stickers[new Random().nextInt(stickers.stickers.length)];
@@ -543,21 +564,19 @@ public final class Userbot {
 					request.inputMessageContent = messageSticker;
 					client.sendMessage(request, true);
 				} else {
-					System.out.println("No stickers found for emoji " + selectedEmoji);
+					logger.warn("No stickers found for emoji {}", selectedEmoji);
 				}
 
 			} catch (InterruptedException | ExecutionException e) {
-				e.printStackTrace();
-				// closeChat(chatId);
+				logger.error("Failed to reply with sticker", e);
 			}
-			// closeChat(chatId);
 		}
 
 		public void reactToMessage(long chatId, long messageId) {
-			System.out.println("Reacting to a message " + messageId + " in chat " + chatId);
+			logger.info("Reacting to a message {} in chat {}", messageId, chatId);
 			try {
 				var reactions = client.send(new TdApi.GetMessageAvailableReactions(chatId, messageId, 15)).get();
-				System.out.println("Got " + reactions.topReactions.length + " topReactions reactions");
+				logger.debug("Got {} top reactions", reactions.topReactions.length);
 				var availableReactions = Stream.of(reactions.topReactions)
 						.filter(reaction -> reaction.type instanceof TdApi.ReactionTypeEmoji && !reaction.needsPremium)
 						.map(reaction -> {
@@ -565,20 +584,15 @@ public final class Userbot {
 							return emoji.emoji;
 						}).collect(Collectors.toList());
 
-				System.out.println("Available reactions: ");
-				availableReactions.forEach(emoji -> System.out.print(emoji));
-				System.out.println();
+				logger.debug("Available reactions: {}", availableReactions.stream().reduce("", (a, b) -> a + b));
 
 				var message = client.send(new TdApi.GetMessage(chatId, messageId)).get();
 				openChat(chatId, Arrays.asList(message.id));
 
-				// var history = readChatHistory(10, chatId, messageId);
-				// var historyContext = buildHistoryContext(history);
-
 				var selectedEmoji = chooseEmoji("", Utills.getTextFromMessage(message).orElse(" "),
 						availableReactions);
 
-				System.out.println("Selected emoji: " + selectedEmoji);
+				logger.info("Selected emoji: {}", selectedEmoji);
 
 				var request = new TdApi.AddMessageReaction();
 				request.chatId = chatId;
@@ -586,10 +600,8 @@ public final class Userbot {
 				request.reactionType = new TdApi.ReactionTypeEmoji(selectedEmoji);
 				client.send(request).get();
 			} catch (InterruptedException | ExecutionException e) {
-				e.printStackTrace();
-				// closeChat(chatId);
+				logger.error("Failed to react to message", e);
 			}
-			// closeChat(chatId);
 		}
 
 		private Optional<Message> getMessage(long chatId, long messageId) {
@@ -597,8 +609,7 @@ public final class Userbot {
 				var message = client.send(new TdApi.GetMessage(chatId, messageId)).get();
 				return Optional.of(message);
 			} catch (InterruptedException | ExecutionException e) {
-				System.out.println("Can't get message " + messageId + " in chat " + chatId);
-				e.printStackTrace();
+				logger.error("Failed to get message " + messageId + " in chat " + chatId, e);
 				return Optional.empty();
 			}
 		}
@@ -610,7 +621,7 @@ public final class Userbot {
 					cache.putUser(userInfo);
 					return Optional.of(userInfo);
 				} catch (ExecutionException | InterruptedException e) {
-					e.printStackTrace();
+					logger.error("Failed to get user " + userId, e);
 					return Optional.empty();
 				}
 			});
@@ -622,7 +633,7 @@ public final class Userbot {
 				return Optional.of(chatInfo);
 
 			} catch (ExecutionException | InterruptedException e) {
-				e.printStackTrace();
+				logger.error("Failed to get chat " + chatId, e);
 				return Optional.empty();
 			}
 		}
@@ -639,20 +650,18 @@ public final class Userbot {
 		private void scheduleAction(Action action) {
 			try {
 				actions.put(action);
-				System.out.println("Action scheduled: " + action);
+				logger.info("Scheduled an action: " + action);
 			} catch (InterruptedException e) {
-				System.out.println("Can't schedule action: " + action);
-				e.printStackTrace();
+				logger.error("Failed to schedule an action: " + action, e);
 			}
 		}
-
 
 		// Download voice note from remote and use ffmpeg to convert voice note to mp3
 		private Optional<byte[]> getVoice(TdApi.MessageVoiceNote message) {
 			int fileId = message.voiceNote.voice.id;
 			return Optional.ofNullable(message.voiceNote.voice.local.path).filter(p -> !p.isEmpty())
 					.or(() -> {
-						System.out.println("Downloading voice note: " + fileId);
+						logger.debug("Downloading voice note: " + fileId);
 						return downloadFile(fileId).map(file -> file.local.path);
 					}).flatMap(path -> {
 						return convertToMp3(path, fileId);
@@ -664,7 +673,7 @@ public final class Userbot {
 			int fileId = message.videoNote.video.id;
 			return Optional.ofNullable(message.videoNote.video.local.path).filter(p -> !p.isEmpty())
 					.or(() -> {
-						System.out.println("Downloading video note: " + fileId);
+						logger.debug("Downloading video note: " + fileId);
 						return downloadFile(fileId).map(file -> file.local.path);
 					}).flatMap(path -> {
 						return convertToMp3(path, fileId);
@@ -673,34 +682,34 @@ public final class Userbot {
 
 		private Optional<File> downloadFile(int fileId) {
 			try {
-				System.out.println("Downloading file: " + fileId);
+				logger.debug("Downloading file: " + fileId);
 				return Optional.ofNullable(client.send(new TdApi.DownloadFile(fileId, 1, 0L, 0L, true))
 						.get());
 			} catch (InterruptedException | ExecutionException e) {
-				e.printStackTrace();
-				System.out.println("Can't get file: " + fileId);
+				logger.error("Failed to download file: " + fileId, e);
 				return Optional.empty();
 			}
 		}
 
 		private Optional<byte[]> convertToMp3(String filePath, int fileId) {
 			try {
+				logger.debug("Converting voice/video note to mp3: " + filePath);
 				var code = Runtime.getRuntime()
 						.exec(new String[] { "ffmpeg", "-y", "-i", filePath,
 								"./" + botSettings.SESSION_NAME + "/downloads/" + fileId + ".mp3" })
 						.waitFor();
-				System.out.println("FFmpeg exit code: " + code);
-				System.out.println("Got voice/video note: " + filePath);
+				logger.debug("FFmpeg exit code: " + code);
+
 				return Optional.ofNullable(Files.readAllBytes(
 						Paths.get("./" + botSettings.SESSION_NAME + "/downloads/" + fileId + ".mp3")));
 			} catch (IOException | InterruptedException e) {
-				System.out.println("Can't convert voice/video note: " + fileId);
-				e.printStackTrace();
+				logger.error("Failed to convert voice/video note to mp3: " + fileId, e);
 				return Optional.empty();
 			}
 		}
 
 		private Optional<byte[]> getPhoto(TdApi.MessagePhoto message) {
+			logger.debug("Trying to download a photo");
 			return Stream.of(message.photo.sizes)
 					.filter(size -> "y".equals(size.type))
 					.findFirst()
@@ -712,11 +721,11 @@ public final class Userbot {
 							.findFirst())
 					.map(size -> {
 						if (size.photo.local.path != null && !size.photo.local.path.isEmpty()) {
-							System.out.println("Local path already exists: " + size.photo.local.path);
+							logger.debug("Local path already exists: " + size.photo.local.path);
 							return size.photo.local.path;
 						}
 						try {
-							System.out.println("Downloading photo: " + size.photo.id);
+							logger.debug("Downloading photo: " + size.photo.id);
 							File file = client.send(new TdApi.DownloadFile(size.photo.id, 1, 0L, 0L, true)).get();
 							return file.local.path;
 						} catch (InterruptedException | ExecutionException e) {
@@ -725,10 +734,10 @@ public final class Userbot {
 						}
 					}).map(path -> {
 						try {
-							System.out.println("Downloaded photo: " + path);
+							logger.debug("Photo downloaded: " + path);
 							return Files.readAllBytes(Paths.get(path));
 						} catch (IOException e) {
-							e.printStackTrace();
+							logger.error("Failed to read photo: " + path, e);
 							return null;
 						}
 					});
@@ -755,8 +764,7 @@ public final class Userbot {
 				}
 				return Optional.empty();
 			} catch (ClassCastException e) {
-				System.out.println("Can't get name of message user of message reply to:" + message);
-				e.printStackTrace();
+				logger.error("Can't get name of message user of message reply to:" + message, e);
 				return Optional.empty();
 			}
 		}
@@ -790,8 +798,7 @@ public final class Userbot {
 				viewMessages.forceRead = true;
 				client.send(viewMessages).get(60, TimeUnit.SECONDS);
 			} catch (InterruptedException | ExecutionException | TimeoutException e) {
-				System.out.println("Can't open chat: " + chatId);
-				e.printStackTrace();
+				logger.error("Failed to open chat: " + chatId, e);
 			}
 		}
 
@@ -799,13 +806,21 @@ public final class Userbot {
 			try {
 				client.send(new TdApi.CloseChat(chatId)).get(60, TimeUnit.SECONDS);
 			} catch (InterruptedException | ExecutionException | TimeoutException e) {
-				System.out.println("Can't close chat: " + chatId);
-				e.printStackTrace();
+				logger.error("Failed to close chat: " + chatId, e);
 			}
 		}
 
 		public Cache getCache() {
 			return cache;
+		}
+
+		public Optional<TdApi.Chat> getChat(long chatId) {
+			try {
+				return Optional.ofNullable(client.send(new TdApi.GetChat(chatId)).get(60, TimeUnit.SECONDS));
+			} catch (InterruptedException | ExecutionException | TimeoutException e) {
+				e.printStackTrace();
+				return Optional.empty();
+			}
 		}
 
 		public void test() {

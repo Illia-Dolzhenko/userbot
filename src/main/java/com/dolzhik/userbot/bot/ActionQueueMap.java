@@ -5,6 +5,9 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.LinkedBlockingQueue;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import com.dolzhik.userbot.Action;
 import com.dolzhik.userbot.Utills;
 
@@ -12,6 +15,7 @@ import it.tdlight.jni.TdApi;
 
 public class ActionQueueMap {
     private final Map<Long, LinkedBlockingQueue<Action>> queues = new ConcurrentHashMap<>();
+    private final Logger logger = LoggerFactory.getLogger(ActionQueueMap.class);
 
     public LinkedBlockingQueue<Action> getQueue(long chatId) {
         return queues.computeIfAbsent(chatId, id -> new LinkedBlockingQueue<>());
@@ -25,10 +29,9 @@ public class ActionQueueMap {
     public void scheduleAction(String action, long chatId, long messageId, Instant timestamp) {
         try {
             queues.get(chatId).put(new Action(action, chatId, messageId, timestamp));
-            System.out.println("Action scheduled: " + action);
+            logger.info("Scheduled an action: " + action);
         } catch (InterruptedException e) {
-            System.out.println("Can't schedule action: " + action);
-            e.printStackTrace();
+            logger.error("Failed to schedule an action: " + action, e);
         }
     }
 }
