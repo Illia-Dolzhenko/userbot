@@ -1,4 +1,4 @@
-package com.dolzhik.userbot.bot;
+package com.dolzhik.userbot.bot.executor;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -12,8 +12,8 @@ import java.util.concurrent.atomic.AtomicLong;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.dolzhik.userbot.Action;
 import com.dolzhik.userbot.Userbot.App;
+import com.dolzhik.userbot.bot.queue.Action;
 import com.dolzhik.userbot.Utills;
 
 public class ChatActionExecutor implements Runnable {

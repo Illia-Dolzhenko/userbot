@@ -5,9 +5,9 @@ import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.dolzhik.userbot.Action;
 import com.dolzhik.userbot.Utills;
-import com.dolzhik.userbot.conf.BotSettings;
+import com.dolzhik.userbot.bot.conf.BotSettings;
+import com.dolzhik.userbot.bot.queue.Action;
 
 import it.tdlight.jni.TdApi.UpdateNewMessage;
 

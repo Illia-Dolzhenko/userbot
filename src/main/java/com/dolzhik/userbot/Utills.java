@@ -22,8 +22,6 @@ public class Utills {
 
     public static boolean chance(double chance) {
         var rand = random.nextDouble();
-        // System.out.println("Random " + rand + " < " + chance + " = " + (rand <
-        // chance));
         return rand < chance;
     }
 

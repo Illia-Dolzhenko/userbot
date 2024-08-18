@@ -1,6 +1,8 @@
-package com.dolzhik.userbot;
+package com.dolzhik.userbot.bot.queue;
 
 import java.time.Instant;
+
+import com.dolzhik.userbot.Utills;
 
 import it.tdlight.jni.TdApi.UpdateNewMessage;
 

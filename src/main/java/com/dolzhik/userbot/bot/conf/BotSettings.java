@@ -1,4 +1,4 @@
-package com.dolzhik.userbot.conf;
+package com.dolzhik.userbot.bot.conf;
 
 import java.io.BufferedReader;
 import java.io.FileInputStream;
@@ -180,7 +180,7 @@ public class BotSettings {
                 message = message.replace(USER_BOT_LOGIN, CHARACTER_NAME);
                 return "New message received: \"" + message
                                 + "\" As " + CHARACTER_NAME
-                                + ", write a very short reply to it or to the one of the previous messges. Write the message in the informal style, with very simple structure. Follow the theme of the current discussion. Don't repeat your own messages. Don't start the message with your name";
+                                + ", write a very short reply to it or to the one of the previous messges. Write the message in the informal style, with very simple structure. Follow the theme of the current discussion. Don't repeat your own messages. Don't start the message with your name.";
         }
 
         public String buildPromtForNewMessage() {

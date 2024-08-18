@@ -1,4 +1,4 @@
-package com.dolzhik.userbot.bot;
+package com.dolzhik.userbot.bot.cache;
 
 public class CacheCleaner implements Runnable {
 

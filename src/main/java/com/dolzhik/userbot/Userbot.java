@@ -27,14 +27,15 @@ import java.util.stream.Stream;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.dolzhik.userbot.bot.ActionQueueMap;
-import com.dolzhik.userbot.bot.Cache;
-import com.dolzhik.userbot.bot.CacheCleaner;
-import com.dolzhik.userbot.bot.ChatActionExecutor;
+import com.dolzhik.userbot.bot.cache.Cache;
+import com.dolzhik.userbot.bot.cache.CacheCleaner;
+import com.dolzhik.userbot.bot.conf.BotSettings;
+import com.dolzhik.userbot.bot.executor.ChatActionExecutor;
+import com.dolzhik.userbot.bot.queue.Action;
+import com.dolzhik.userbot.bot.queue.ActionQueueMap;
 import com.dolzhik.userbot.bot.updateProcessor.GroupChatUpdateProcessor;
 import com.dolzhik.userbot.bot.updateProcessor.PrivateChatUpdateProcessor;
 import com.dolzhik.userbot.bot.updateProcessor.UpdateProcessor;
-import com.dolzhik.userbot.conf.BotSettings;
 import com.dolzhik.userbot.image.ImageCaptioner;
 import com.dolzhik.userbot.image.RestGeminiCaptioner;
 import com.dolzhik.userbot.llm.GptModel;
@@ -62,7 +63,6 @@ import it.tdlight.jni.TdApi.InputMessageReplyToMessage;
 import it.tdlight.jni.TdApi.InputMessageText;
 import it.tdlight.jni.TdApi.Message;
 import it.tdlight.jni.TdApi.MessageContent;
-import it.tdlight.jni.TdApi.MessageSenderUser;
 import it.tdlight.jni.TdApi.SendMessage;
 import it.tdlight.jni.TdApi.TextEntity;
 import it.tdlight.jni.TdApi.User;
@@ -180,15 +180,13 @@ public final class Userbot {
 			this.imageCaptioner = imageCaptioner;
 			this.lastIsTypingActionMap = lastIsTypingActionMap;
 
-			// Add an example update handler that prints when the bot is started
+			// Add an update handler that prints when the bot is started
 			clientBuilder.addUpdateHandler(TdApi.UpdateAuthorizationState.class, this::onUpdateAuthorizationState);
 
-			// Add an example command handler that stops the bot
-			clientBuilder.addCommandHandler("stop", this::onStopCommand);
-
-			// Add an example update handler that prints every received message
+			// Add an update handler for received messages
 			clientBuilder.addUpdateHandler(TdApi.UpdateNewMessage.class, this::onUpdateNewMessage);
 
+			// Add an update handler for received chat actions
 			clientBuilder.addUpdateHandler(TdApi.UpdateChatAction.class, this::onUpdateChatAction);
 
 			// Build the client
@@ -254,7 +252,6 @@ public final class Userbot {
 				}
 			}
 
-			// kurilka chatId == -1002097327825L
 			if (update.message.senderId instanceof TdApi.MessageSenderUser user
 					&& user.userId != botSettings.USER_BOT_ID && (update.message.content instanceof TdApi.MessageText
 							|| update.message.content instanceof TdApi.MessageVoiceNote
@@ -291,29 +288,6 @@ public final class Userbot {
 		private void onUpdateChatAction(TdApi.UpdateChatAction update) {
 			if (update.action instanceof TdApi.ChatActionTyping) {
 				lastIsTypingActionMap.put(update.chatId, Instant.now());
-			}
-		}
-
-		/**
-		 * Close the bot if the /stop command is sent by the administrator
-		 */
-		private void onStopCommand(TdApi.Chat chat, TdApi.MessageSender commandSender, String arguments) {
-			// Check if the sender is the admin
-			if (isAdmin(commandSender)) {
-				// Stop the client
-				logger.info("Received stop command. closing...");
-				client.sendClose();
-			}
-		}
-
-		/**
-		 * Check if the command sender is admin
-		 */
-		public boolean isAdmin(TdApi.MessageSender sender) {
-			if (sender instanceof MessageSenderUser messageSenderUser) {
-				return messageSenderUser.userId == adminId;
-			} else {
-				return false;
 			}
 		}
 
@@ -389,7 +363,7 @@ public final class Userbot {
 
 			message.ifPresent(messageToReply -> {
 				Utills.getTextFromMessage(messageToReply).or(() -> { // If the message is not a text message try to get
-																		// voice transcript
+																		// voice transcript or image caption
 					return switch (messageToReply.content) {
 						case TdApi.MessageVoiceNote voice ->
 							getVoice(voice).flatMap(file -> voiceToText(file, messageId));

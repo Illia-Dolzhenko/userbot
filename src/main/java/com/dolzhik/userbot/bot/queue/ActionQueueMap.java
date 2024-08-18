@@ -1,4 +1,4 @@
-package com.dolzhik.userbot.bot;
+package com.dolzhik.userbot.bot.queue;
 
 import java.time.Instant;
 import java.util.Map;
@@ -8,7 +8,6 @@ import java.util.concurrent.LinkedBlockingQueue;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.dolzhik.userbot.Action;
 import com.dolzhik.userbot.Utills;
 
 import it.tdlight.jni.TdApi;
